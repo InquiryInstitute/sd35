@@ -1,0 +1,15 @@
+# SageMaker inference container: Stable Diffusion 3.5 (same /ping, /invocations contract as serve.py)
+FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
+
+ENV PYTHONUNBUFFERED=1
+WORKDIR /opt/ml/model
+
+COPY requirements-sd35.txt .
+RUN pip install --no-cache-dir -r requirements-sd35.txt
+
+COPY serve_sd35.py .
+
+ENV SAGEMAKER_BIND_TO_PORT=8080
+EXPOSE 8080
+
+ENTRYPOINT ["python", "serve_sd35.py"]

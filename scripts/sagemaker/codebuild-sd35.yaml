@@ -1,0 +1,64 @@
+# CloudFormation: CodeBuild project for SD 3.5 (buildspec-sd35.yml)
+# Deploy: aws cloudformation create-stack --stack-name sd35 --template-body file://scripts/sagemaker/codebuild-sd35.yaml --parameters ... --region us-east-1
+# Or use scripts/sagemaker/deploy-codebuild-sd35-stack.sh
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CodeBuild project sd35 for SD 3.5 SageMaker endpoint"
+
+Parameters:
+  ConnectionArn:
+    Type: String
+    Description: ARN of the CodeStar/CodeConnections connection (e.g. sd35-github)
+  GitHubRepo:
+    Type: String
+    Default: "InquiryInstitute/sd35"
+    Description: "GitHub repo as owner/name"
+  SageMakerExecutionRoleArn:
+    Type: String
+    Description: SageMaker execution role ARN (e.g. SageMaker-Inference-InqSD)
+  CodeBuildServiceRoleName:
+    Type: String
+    Default: "CodeBuild-SD35-ServiceRole"
+    Description: Name of the IAM role for CodeBuild (must already exist with ECR, SageMaker, SSM, connection permissions)
+  Region:
+    Type: String
+    Default: "us-east-1"
+
+Resources:
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: sd35
+      Description: Build SD 3.5 Docker image and create SageMaker endpoint inq-sd35-async
+      ServiceRole: !Sub "arn:aws:iam::${AWS::AccountId}:role/${CodeBuildServiceRoleName}"
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Source:
+        Type: GITHUB
+        Location: !Sub "https://github.com/${GitHubRepo}"
+        BuildSpec: buildspec-sd35.yml
+        GitCloneDepth: 1
+        ReportBuildStatus: true
+        Auth:
+          Type: CODECONNECTIONS
+          Resource: !Ref ConnectionArn
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:7.0
+        ComputeType: BUILD_GENERAL1_LARGE
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: SAGEMAKER_EXECUTION_ROLE_ARN
+            Value: !Ref SageMakerExecutionRoleArn
+            Type: PLAINTEXT
+          - Name: AWS_REGION
+            Value: !Ref Region
+            Type: PLAINTEXT
+      TimeoutInMinutes: 60
+
+Outputs:
+  ProjectName:
+    Description: CodeBuild project name
+    Value: !Ref CodeBuildProject
+    Export:
+      Name: !Sub "${AWS::StackName}-ProjectName"

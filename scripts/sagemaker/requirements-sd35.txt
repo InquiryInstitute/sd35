@@ -1,0 +1,10 @@
+# SageMaker SD 3.5 inference (PyTorch 2.4+ base)
+# Pin to avoid Parameter._is_hf_initialized compatibility errors between diffusers/transformers.
+flask>=2.3
+gunicorn>=21
+diffusers>=0.30,<0.32
+transformers>=4.44,<4.47
+accelerate>=0.33
+safetensors>=0.4
+sentencepiece
+Pillow

@@ -1,0 +1,42 @@
+# AWS CodeBuild: build SD 3.5 image on AWS, push to ECR, create SageMaker endpoint inq-sd35.
+# Use this when you don't want to build the large image locally.
+#
+# 1. Create CodeBuild project (see scripts/sagemaker/create-codebuild-sd35-project.sh or README).
+# 2. Set in CodeBuild project env: SAGEMAKER_EXECUTION_ROLE_ARN (required).
+# 3. Store HF_TOKEN in Parameter Store (recommended) or as a CodeBuild env var:
+#    aws ssm put-parameter --name /cards/sd35/hf-token --type SecureString --value "hf_..."
+# 4. Start build (Console or: aws codebuild start-build --project-name sd35).
+
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - 'REPO_ROOT=$(find "$CODEBUILD_SRC_DIR" -maxdepth 6 -path "*/scripts/sagemaker/deploy.py" -type f 2>/dev/null | head -1 | xargs dirname | xargs dirname | xargs dirname); [ -z "$REPO_ROOT" ] && REPO_ROOT="$CODEBUILD_SRC_DIR"; cd "$REPO_ROOT" && pwd && test -f scripts/sagemaker/deploy.py'
+      - 'echo "Pre-build ECR login and env..."'
+      - 'export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)'
+      - 'export AWS_REGION=${AWS_REGION:-us-east-1}'
+      - 'export ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"'
+      - 'export IMAGE_URI="${ECR_URI}/inq-sd35:latest"'
+      - 'aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_URI'
+      - 'aws ecr create-repository --repository-name inq-sd35 --region $AWS_REGION || true'
+      - 'pip install --quiet sagemaker boto3'
+      - 'if [ -z "$HF_TOKEN" ]; then T=$(aws ssm get-parameter --name /cards/sd35/hf-token --with-decryption --query Parameter.Value --output text 2>/dev/null) || true; if [ -n "$T" ]; then export HF_TOKEN="$T" && echo "HF_TOKEN loaded from Parameter Store."; else echo "HF_TOKEN not in Parameter Store (set CodeBuild env or create /cards/sd35/hf-token)."; fi; else echo "HF_TOKEN from environment."; fi'
+      - '[ -z "$HF_TOKEN" ] && echo "HF_TOKEN not set; gated model may fail." || true'
+  build:
+    commands:
+      - 'echo "Building SD 3.5 Docker image..."'
+      - 'docker build -f scripts/sagemaker/Dockerfile.sd35 -t inq-sd35:latest scripts/sagemaker'
+      - 'docker tag inq-sd35:latest $IMAGE_URI'
+      - 'echo "Pushing to ECR..."'
+      - 'docker push $IMAGE_URI'
+  post_build:
+    commands:
+      - 'echo "Creating SageMaker async endpoint inq-sd35-async..."'
+      - 'if [ -z "$SAGEMAKER_EXECUTION_ROLE_ARN" ]; then echo "Set SAGEMAKER_EXECUTION_ROLE_ARN in CodeBuild project environment."; exit 1; fi'
+      - 'export SAGEMAKER_EXECUTION_ROLE_ARN'
+      - 'python3 scripts/sagemaker/deploy.py --skip-build --sd35 --async --async-s3-bucket inq-cards-sd35-async-548217737835 --no-wait --region $AWS_REGION'
+artifacts:
+  files: []
+cache:
+  paths: []
